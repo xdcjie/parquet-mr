@@ -22,6 +22,10 @@ import static org.apache.parquet.Log.INFO;
 import static org.apache.parquet.Preconditions.checkNotNull;
 import static org.apache.parquet.hadoop.ParquetWriter.DEFAULT_BLOCK_SIZE;
 import static org.apache.parquet.hadoop.ParquetWriter.DEFAULT_PAGE_SIZE;
+import static org.apache.parquet.hadoop.ParquetWriter.DEFAULT_IS_BF_ENABLED;
+import static org.apache.parquet.hadoop.ParquetWriter.DEFAULT_BF_FALSE_POSITIVE;
+import static org.apache.parquet.hadoop.ParquetWriter.DEFAULT_UNIQUE_RATIO_THRESHOLD;
+import static org.apache.parquet.hadoop.ParquetWriter.DEFAULT_VALUE_COUNT_THRESHOLD;
 import static org.apache.parquet.hadoop.util.ContextUtil.getConfiguration;
 
 import java.io.IOException;
@@ -38,6 +42,7 @@ import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 
 import org.apache.parquet.Log;
 import org.apache.parquet.column.ParquetProperties.WriterVersion;
+import org.apache.parquet.column.bloomfilter.BloomFilterProperties;
 import org.apache.parquet.hadoop.ParquetFileWriter.Mode;
 import org.apache.parquet.hadoop.api.WriteSupport;
 import org.apache.parquet.hadoop.api.WriteSupport.WriteContext;
@@ -115,6 +120,10 @@ public class ParquetOutputFormat<T> extends FileOutputFormat<Void, T> {
   public static final String MEMORY_POOL_RATIO    = "parquet.memory.pool.ratio";
   public static final String MIN_MEMORY_ALLOCATION = "parquet.memory.min.chunk.size";
   public static final String MAX_PADDING_BYTES    = "parquet.writer.max-padding";
+  public static final String ENABLE_BLOOM_FILTER  = "parquet.enable.bloom.filter";
+  public static final String BLOOM_FILTER_FALSE_POSITIVE = "parquet.bloom.filter.false-positive";
+  public static final String BLOOM_VALUE_COUNT_THRESHOLD = "parquet.bloom.filter.value-count";
+  public static final String BLOOM_UNIQUE_RATIO_THRESHOLD = "parquet.bloom.filter.unique-ratio";
 
   // default to no padding for now
   private static final int DEFAULT_MAX_PADDING_SIZE = 0;
@@ -188,6 +197,39 @@ public class ParquetOutputFormat<T> extends FileOutputFormat<Void, T> {
     return getValidation(getConfiguration(jobContext));
   }
 
+
+  public static void setEnableBloomFilter(JobContext jobContext, boolean enableBloomFilter) {
+    setEnableBloomFilter(getConfiguration(jobContext), enableBloomFilter);
+  }
+
+  public static boolean getEnableBloomFilter(JobContext jobContext) {
+    return getEnableBloomFilter(getConfiguration(jobContext));
+  }
+
+  public static void setBloomFilterUniqueRatioThreshold(JobContext jobContext, float uniqueRatio) {
+    setBloomFilterUniqueRatioThreshold(getConfiguration(jobContext), uniqueRatio);
+  }
+
+  public static float getBloomFilterUniqueRatioThreshold(JobContext jobContext) {
+    return getBloomFilterUniqueRatioThreshold(getConfiguration(jobContext));
+  }
+
+  public static void setBloomFilterValueCountThreshold(JobContext jobContext, int valueCount) {
+    setBloomFilterValueCountThreshold(getConfiguration(jobContext), valueCount);
+  }
+
+  public static int getBloomFilterValueCountThreshold(JobContext jobContext) {
+    return getBloomFilterValueCountThreshold(getConfiguration(jobContext));
+  }
+
+  public static void setBloomFilterFalsePositive(JobContext jobContext, float falsePositive) {
+    setBloomFilterFalsePositive(getConfiguration(jobContext), falsePositive);
+  }
+
+  public static float getBloomFilterFalsePositive(JobContext jobContext) {
+    return getBloomFilterFalsePositive(getConfiguration(jobContext));
+  }
+
   public static boolean getEnableDictionary(Configuration configuration) {
     return configuration.getBoolean(ENABLE_DICTIONARY, true);
   }
@@ -245,6 +287,38 @@ public class ParquetOutputFormat<T> extends FileOutputFormat<Void, T> {
   private static int getMaxPaddingSize(Configuration conf) {
     // default to no padding, 0% of the row group size
     return conf.getInt(MAX_PADDING_BYTES, DEFAULT_MAX_PADDING_SIZE);
+  }
+
+  public static void setEnableBloomFilter(Configuration configuration, boolean enableBloomFilter) {
+    configuration.setBoolean(ENABLE_BLOOM_FILTER, enableBloomFilter);
+  }
+
+  public static boolean getEnableBloomFilter(Configuration configuration) {
+    return configuration.getBoolean(ENABLE_BLOOM_FILTER, DEFAULT_IS_BF_ENABLED);
+  }
+
+  public static void setBloomFilterFalsePositive(Configuration configuration, float falsePositive) {
+    configuration.setFloat(BLOOM_FILTER_FALSE_POSITIVE, falsePositive);
+  }
+
+  public static float getBloomFilterFalsePositive(Configuration configuration) {
+    return configuration.getFloat(BLOOM_FILTER_FALSE_POSITIVE, DEFAULT_BF_FALSE_POSITIVE);
+  }
+
+  public static void setBloomFilterUniqueRatioThreshold(Configuration configuration, float uniqueRatio) {
+    configuration.setFloat(BLOOM_UNIQUE_RATIO_THRESHOLD, uniqueRatio);
+  }
+
+  public static float getBloomFilterUniqueRatioThreshold(Configuration configuration) {
+    return configuration.getFloat(BLOOM_UNIQUE_RATIO_THRESHOLD, DEFAULT_UNIQUE_RATIO_THRESHOLD);
+  }
+
+  public static void setBloomFilterValueCountThreshold(Configuration configuration, int valueCount) {
+    configuration.setInt(BLOOM_VALUE_COUNT_THRESHOLD, valueCount);
+  }
+
+  public static int getBloomFilterValueCountThreshold(Configuration configuration) {
+    return configuration.getInt(BLOOM_VALUE_COUNT_THRESHOLD, DEFAULT_VALUE_COUNT_THRESHOLD);
   }
 
 
@@ -307,6 +381,19 @@ public class ParquetOutputFormat<T> extends FileOutputFormat<Void, T> {
     if (INFO) LOG.info("Writer version is: " + writerVersion);
     int maxPaddingSize = getMaxPaddingSize(conf);
     if (INFO) LOG.info("Maximum row group padding size is " + maxPaddingSize + " bytes");
+    boolean enableBloomFilter = getEnableBloomFilter(conf);
+    if (INFO) LOG.info("BloomFilter is " + (enableBloomFilter ? "on" : "off"));
+
+    BloomFilterProperties bloomFilterProperties = null;
+    if (enableBloomFilter) {
+      float falsePositive = getBloomFilterFalsePositive(conf);
+      if (INFO) LOG.info("BloomFilterFalsePositive is " + falsePositive);
+      int valueCountThreshold = getBloomFilterValueCountThreshold(conf);
+      if (INFO) LOG.info("BloomFilterValueCount is " + valueCountThreshold);
+      float uniqueRationThreshold = getBloomFilterUniqueRatioThreshold(conf);
+      if (INFO) LOG.info("BloomFilterUniqueRatio is " + uniqueRationThreshold);
+      bloomFilterProperties = new BloomFilterProperties(uniqueRationThreshold, valueCountThreshold, falsePositive);
+    }
 
     WriteContext init = writeSupport.init(conf);
     ParquetFileWriter w = new ParquetFileWriter(
@@ -324,18 +411,34 @@ public class ParquetOutputFormat<T> extends FileOutputFormat<Void, T> {
           "be reset by the new value: " + maxLoad);
     }
 
-    return new ParquetRecordWriter<T>(
-        w,
-        writeSupport,
-        init.getSchema(),
-        init.getExtraMetaData(),
-        blockSize, pageSize,
-        codecFactory.getCompressor(codec, pageSize),
-        dictionaryPageSize,
-        enableDictionary,
-        validating,
-        writerVersion,
-        memoryManager);
+    if (bloomFilterProperties == null) {
+        return new ParquetRecordWriter<T>(
+            w,
+            writeSupport,
+            init.getSchema(),
+            init.getExtraMetaData(),
+            blockSize, pageSize,
+            codecFactory.getCompressor(codec, pageSize),
+            dictionaryPageSize,
+            enableDictionary,
+            validating,
+            writerVersion,
+            memoryManager,
+            bloomFilterProperties);
+    } else {
+        return new ParquetRecordWriter<T>(
+            w,
+            writeSupport,
+            init.getSchema(),
+            init.getExtraMetaData(),
+            blockSize, pageSize,
+            codecFactory.getCompressor(codec, pageSize),
+            dictionaryPageSize,
+            enableDictionary,
+            validating,
+            writerVersion,
+            memoryManager);
+    }
   }
 
   /**

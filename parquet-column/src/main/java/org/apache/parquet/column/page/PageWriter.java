@@ -22,6 +22,7 @@ import java.io.IOException;
 
 import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.column.Encoding;
+import org.apache.parquet.column.bloomfilter.BloomFilter;
 import org.apache.parquet.column.statistics.Statistics;
 
 /**
@@ -79,6 +80,12 @@ public interface PageWriter {
    * @param dictionaryPage the dictionary page containing the dictionary data
    */
   void writeDictionaryPage(DictionaryPage dictionaryPage) throws IOException;
+
+  /**
+   * writes a bloomfilter to Statistics
+   * @param bloomFilter the bloomfilter
+   */
+  void writeBloomFilter(BloomFilter bloomFilter);
 
   /**
    * @param prefix a prefix header to add at every line

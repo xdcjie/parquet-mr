@@ -33,6 +33,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.nio.ByteBuffer;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -55,6 +56,7 @@ import org.apache.parquet.format.RowGroup;
 import org.apache.parquet.format.SchemaElement;
 import org.apache.parquet.format.Statistics;
 import org.apache.parquet.format.Type;
+import org.apache.parquet.format.BloomFilter;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
@@ -68,6 +70,7 @@ import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
 import org.apache.parquet.schema.Type.Repetition;
 import org.apache.parquet.schema.TypeVisitor;
 import org.apache.parquet.schema.Types;
+import org.apache.parquet.column.bloomfilter.FilterBuilder;
 
 // TODO: This file has become too long!
 // TODO: Lets split it up: https://issues.apache.org/jira/browse/PARQUET-310
@@ -242,8 +245,17 @@ public class ParquetMetadataConverter {
         stats.setMin(statistics.getMinBytes());
       }
     }
+    if (statistics.hasBloomFilter()) {
+      stats.setBloom_filter(toParquetBloomFilter(statistics.getBloomFilter()));
+    }
     return stats;
   }
+
+  public static BloomFilter toParquetBloomFilter(org.apache.parquet.column.bloomfilter.BloomFilter bloomFilter) {
+    return new BloomFilter(bloomFilter.getBitSize(), bloomFilter.getHashes(),
+            bloomFilter.getByteLength(), bloomFilter.getFileOffset());
+  }
+
   /**
    * @deprecated Replaced by {@link #fromParquetStatistics(
    * String createdBy, Statistics statistics, PrimitiveTypeName type)}
@@ -265,8 +277,17 @@ public class ParquetMetadataConverter {
         stats.setMinMaxFromBytes(statistics.min.array(), statistics.max.array());
       }
       stats.setNumNulls(statistics.null_count);
+      if (statistics.isSetBloom_filter()) {
+        stats.setBloomFilter(fromParquetBloomFilter(statistics.getBloom_filter()));
+      }
     }
     return stats;
+  }
+
+  public static org.apache.parquet.column.bloomfilter.BloomFilter fromParquetBloomFilter(BloomFilter thriftBloomFilter) {
+    return new FilterBuilder(thriftBloomFilter.getNum_bits(), thriftBloomFilter.getNum_hash_functions())
+                    .buildBloomFilter(thriftBloomFilter.getFile_offset(), thriftBloomFilter.getByte_length());
+
   }
 
   public PrimitiveTypeName getPrimitive(Type type) {

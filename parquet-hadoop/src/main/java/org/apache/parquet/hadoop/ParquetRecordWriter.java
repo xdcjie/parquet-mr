@@ -24,6 +24,7 @@ import org.apache.hadoop.mapreduce.RecordWriter;
 import org.apache.hadoop.mapreduce.TaskAttemptContext;
 
 import org.apache.parquet.column.ParquetProperties.WriterVersion;
+import org.apache.parquet.column.bloomfilter.BloomFilterProperties;
 import org.apache.parquet.hadoop.CodecFactory.BytesCompressor;
 import org.apache.parquet.hadoop.api.WriteSupport;
 import org.apache.parquet.schema.MessageType;
@@ -104,6 +105,37 @@ public class ParquetRecordWriter<T> extends RecordWriter<Void, T> {
     memoryManager.addWriter(internalWriter, blockSize);
   }
 
+  /**
+   *
+   * @param w the file to write to
+   * @param writeSupport the class to convert incoming records
+   * @param schema the schema of the records
+   * @param extraMetaData extra meta data to write in the footer of the file
+   * @param blockSize the size of a block in the file (this will be approximate)
+   * @param compressor the compressor used to compress the pages
+   * @param dictionaryPageSize the threshold for dictionary size
+   * @param enableDictionary to enable the dictionary
+   * @param validating if schema validation should be turned on
+   */
+  public ParquetRecordWriter(
+          ParquetFileWriter w,
+          WriteSupport<T> writeSupport,
+          MessageType schema,
+          Map<String, String> extraMetaData,
+          long blockSize, int pageSize,
+          BytesCompressor compressor,
+          int dictionaryPageSize,
+          boolean enableDictionary,
+          boolean validating,
+          WriterVersion writerVersion,
+          MemoryManager memoryManager,
+          BloomFilterProperties bloomFilterProperties) {
+    internalWriter = new InternalParquetRecordWriter<T>(w, writeSupport, schema,
+            extraMetaData, blockSize, pageSize, compressor, dictionaryPageSize, enableDictionary,
+            validating, writerVersion, bloomFilterProperties);
+    this.memoryManager = checkNotNull(memoryManager, "memoryManager");
+    memoryManager.addWriter(internalWriter, blockSize);
+  }
   /**
    * {@inheritDoc}
    */

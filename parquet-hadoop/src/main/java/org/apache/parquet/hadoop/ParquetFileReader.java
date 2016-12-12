@@ -20,12 +20,14 @@ package org.apache.parquet.hadoop;
 
 import static org.apache.parquet.Log.DEBUG;
 import static org.apache.parquet.bytes.BytesUtils.readIntLittleEndian;
+import static org.apache.parquet.filter2.compat.RowGroupFetcher.fetchRowGroups;
 import static org.apache.parquet.format.converter.ParquetMetadataConverter.NO_FILTER;
 import static org.apache.parquet.format.converter.ParquetMetadataConverter.SKIP_ROW_GROUPS;
 import static org.apache.parquet.format.converter.ParquetMetadataConverter.fromParquetStatistics;
 import static org.apache.parquet.hadoop.ParquetFileWriter.MAGIC;
 import static org.apache.parquet.hadoop.ParquetFileWriter.PARQUET_COMMON_METADATA_FILE;
 import static org.apache.parquet.hadoop.ParquetFileWriter.PARQUET_METADATA_FILE;
+import static org.apache.parquet.hadoop.ParquetInputFormat.getFilter;
 
 import java.io.ByteArrayInputStream;
 import java.io.Closeable;
@@ -41,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.BitSet;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -56,11 +59,14 @@ import org.apache.hadoop.fs.Path;
 import org.apache.parquet.Log;
 import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.column.ColumnDescriptor;
+import org.apache.parquet.column.bloomfilter.BloomFilter;
 import org.apache.parquet.column.page.DataPage;
 import org.apache.parquet.column.page.DataPageV1;
 import org.apache.parquet.column.page.DataPageV2;
 import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.page.PageReadStore;
+import org.apache.parquet.column.statistics.Statistics;
+import org.apache.parquet.filter2.compat.FilterCompat;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.format.DataPageHeader;
 import org.apache.parquet.format.DataPageHeaderV2;
@@ -288,7 +294,7 @@ public class ParquetFileReader implements Closeable {
    * Read the footers of all the files under that path (recursively)
    * using summary files if possible
    * @param configuration the configuration to access the FS
-   * @param fileStatus the root dir
+   * @param pathStatus the root dir
    * @return all the footers
    * @throws IOException
    */
@@ -428,9 +434,28 @@ public class ParquetFileReader implements Closeable {
         throw new RuntimeException("corrupted file: the footer index is not within the file");
       }
       f.seek(footerIndex);
-      return converter.readParquetMetadata(f, filter);
+      ParquetMetadata footer = converter.readParquetMetadata(f, filter);
+      if (configuration.getBoolean(ParquetOutputFormat.ENABLE_BLOOM_FILTER, false)) {
+        FilterCompat.Filter predicateFilter = getFilter(configuration);
+        List<ColumnChunkMetaData> fetchedColumns = fetchRowGroups(predicateFilter, footer.getBlocks());
+        readBloomFilterBytes(f, fetchedColumns);
+      }
+      return footer;
     } finally {
       f.close();
+    }
+  }
+
+  public static final void readBloomFilterBytes(FSDataInputStream f, List<ColumnChunkMetaData> columns) throws IOException {
+    for (ColumnChunkMetaData column : columns) {
+      Statistics stats = column.getStatistics();
+      if (stats.hasBloomFilter() && stats.getBloomFilter().getByteLength() > 0) {
+        BloomFilter bloomFilter = stats.getBloomFilter();
+        byte[] bitSet = new byte[(int) bloomFilter.getByteLength()];
+        f.seek(bloomFilter.getFileOffset());
+        f.readFully(bitSet);
+        bloomFilter.setBitSet(BitSet.valueOf(bitSet));
+      }
     }
   }
 

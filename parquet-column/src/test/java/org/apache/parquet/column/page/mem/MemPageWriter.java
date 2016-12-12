@@ -28,6 +28,7 @@ import java.util.List;
 import org.apache.parquet.Log;
 import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.column.Encoding;
+import org.apache.parquet.column.bloomfilter.BloomFilter;
 import org.apache.parquet.column.page.DataPageV1;
 import org.apache.parquet.column.page.DataPageV2;
 import org.apache.parquet.column.page.DictionaryPage;
@@ -103,6 +104,9 @@ public class MemPageWriter implements PageWriter {
     this.dictionaryPage = dictionaryPage.copy();
     if (DEBUG) LOG.debug("dictionary page written for " + dictionaryPage.getBytes().size() + " bytes and " + dictionaryPage.getDictionarySize() + " records");
   }
+
+  @Override
+  public void writeBloomFilter(BloomFilter bloomFilter) {}
 
   @Override
   public String memUsageString(String prefix) {

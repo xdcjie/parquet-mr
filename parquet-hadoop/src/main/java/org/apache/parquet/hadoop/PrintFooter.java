@@ -1,4 +1,4 @@
-/* 
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -46,6 +46,7 @@ import org.apache.hadoop.fs.Path;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.Encoding;
 import org.apache.parquet.column.statistics.Statistics;
+import org.apache.parquet.column.bloomfilter.BloomFilter;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
@@ -138,18 +139,22 @@ public class PrintFooter {
         threadPool.shutdownNow();
       }
     }
-    Set<Entry<ColumnDescriptor, ColStats>> entries = stats.entrySet();
+
     long total = 0;
     long totalUnc = 0;
-    for (Entry<ColumnDescriptor, ColStats> entry : entries) {
-      ColStats colStats = entry.getValue();
-      total += colStats.allStats.total;
-      totalUnc += colStats.uncStats.total;
-    }
+    for (int i = 0; i < stats.size(); i++) {
+      System.out.println("block [" + i + "] columns info.");
+      Set<Entry<ColumnDescriptor, ColStats>> entries = stats.get(i).entrySet();
+      for (Entry<ColumnDescriptor, ColStats> entry : entries) {
+        ColStats colStats = entry.getValue();
+        total += colStats.allStats.total;
+        totalUnc += colStats.uncStats.total;
+      }
 
-    for (Entry<ColumnDescriptor, ColStats> entry : entries) {
-      ColStats colStats = entry.getValue();
-      System.out.println(entry.getKey() +" " + percent(colStats.allStats.total, total) + "% of all space " + colStats);
+      for (Entry<ColumnDescriptor, ColStats> entry : entries) {
+        ColStats colStats = entry.getValue();
+        System.out.println(entry.getKey() + " " + percent(colStats.allStats.total, total) + "% of all space " + colStats);
+      }
     }
 
     System.out.println("number of blocks: " + blockCount);
@@ -161,19 +166,21 @@ public class PrintFooter {
 
   private static void add(ParquetMetadata footer) {
     for (BlockMetaData blockMetaData : footer.getBlocks()) {
+      stats.add(new LinkedHashMap<ColumnDescriptor, ColStats>());
       ++ blockCount;
       MessageType schema = footer.getFileMetaData().getSchema();
       recordCount += blockMetaData.getRowCount();
+
       List<ColumnChunkMetaData> columns = blockMetaData.getColumns();
       for (ColumnChunkMetaData columnMetaData : columns) {
         ColumnDescriptor desc = schema.getColumnDescription(columnMetaData.getPath().toArray());
         add(
-            desc,
-            columnMetaData.getValueCount(),
-            columnMetaData.getTotalSize(),
-            columnMetaData.getTotalUncompressedSize(),
-            columnMetaData.getEncodings(),
-            columnMetaData.getStatistics());
+                desc,
+                columnMetaData.getValueCount(),
+                columnMetaData.getTotalSize(),
+                columnMetaData.getTotalUncompressedSize(),
+                columnMetaData.getEncodings(),
+                columnMetaData.getStatistics());
       }
     }
   }
@@ -206,7 +213,7 @@ public class PrintFooter {
     return ((float)previousSize/1000) + unit[count];
   }
 
-  private static Map<ColumnDescriptor, ColStats> stats = new LinkedHashMap<ColumnDescriptor, ColStats>();
+  private static ArrayList<Map<ColumnDescriptor, ColStats>> stats = new ArrayList<Map<ColumnDescriptor, ColStats>>();
   private static int blockCount = 0;
   private static long recordCount = 0;
 
@@ -223,10 +230,10 @@ public class PrintFooter {
 
     public String toString(int blocks) {
       return
-          "min: " + humanReadable(min) +
-          " max: " + humanReadable(max) +
-          " average: " + humanReadable(total/blocks) +
-          " total: " + humanReadable(total);
+              "min: " + humanReadable(min) +
+                      " max: " + humanReadable(max) +
+                      " average: " + humanReadable(total/blocks) +
+                      " total: " + humanReadable(total);
     }
   }
 
@@ -252,19 +259,22 @@ public class PrintFooter {
     public String toString() {
       long raw = uncStats.total;
       long compressed = allStats.total;
+	  String bloomInfo = colValuesStats.hasBloomFilter() ? colValuesStats.getBloomFilter().toString() : "";
       return encodings + " " + allStats.toString(blocks) + " (raw data: " + humanReadable(raw) + (raw == 0 ? "" : " saving " + (raw - compressed)*100/raw + "%") + ")\n"
-      + "  values: "+valueCountStats.toString(blocks) + "\n"
-      + "  uncompressed: "+uncStats.toString(blocks) + "\n"
-      + "  column values statistics: " + colValuesStats.toString();
+              + "  values: "+valueCountStats.toString(blocks) + "\n"
+              + "  uncompressed: "+uncStats.toString(blocks) + "\n"
+              + "  column values statistics: " + colValuesStats.toString() + "\n"
+              + "  bloomfilter is " + (colValuesStats.hasBloomFilter() ? "on" : "off") + "\n"
+              + bloomInfo;
     }
 
   }
 
   private static void add(ColumnDescriptor desc, long valueCount, long size, long uncSize, Collection<Encoding> encodings, Statistics colValuesStats) {
-    ColStats colStats = stats.get(desc);
+    ColStats colStats = stats.get(blockCount-1).get(desc);
     if (colStats == null) {
       colStats = new ColStats();
-      stats.put(desc, colStats);
+      stats.get(blockCount-1).put(desc, colStats);
     }
     colStats.add(valueCount, size, uncSize, encodings, colValuesStats);
   }

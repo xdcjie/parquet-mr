@@ -34,6 +34,7 @@ import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.bytes.ConcatenatingByteArrayCollector;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.Encoding;
+import org.apache.parquet.column.bloomfilter.BloomFilter;
 import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.page.PageWriteStore;
 import org.apache.parquet.column.page.PageWriter;
@@ -65,6 +66,8 @@ class ColumnChunkPageWriteStore implements PageWriteStore {
     private Set<Encoding> encodings = new HashSet<Encoding>();
 
     private Statistics totalStatistics;
+
+    private BloomFilter columnBloomFilter = null;
 
     private ColumnChunkPageWriter(ColumnDescriptor path, BytesCompressor compressor, int pageSize) {
       this.path = path;
@@ -180,16 +183,21 @@ class ColumnChunkPageWriteStore implements PageWriteStore {
         encodings.add(dictionaryPage.getEncoding());
       }
       writer.writeDataPages(buf, uncompressedLength, compressedLength, totalStatistics, new ArrayList<Encoding>(encodings));
+      if (columnBloomFilter != null) {
+        writer.writeBloomFilter(columnBloomFilter);
+      }
       writer.endColumn();
       if (INFO) {
         LOG.info(
             String.format(
                 "written %,dB for %s: %,d values, %,dB raw, %,dB comp, %d pages, encodings: %s",
                 buf.size(), path, totalValueCount, uncompressedLength, compressedLength, pageCount, encodings)
-            + (dictionaryPage != null ? String.format(
+                    + (dictionaryPage != null ? String.format(
                     ", dic { %,d entries, %,dB raw, %,dB comp}",
                     dictionaryPage.getDictionarySize(), dictionaryPage.getUncompressedSize(), dictionaryPage.getDictionarySize())
-                    : ""));
+                    : "")
+                + (columnBloomFilter != null ? String.format(", bloom filter {%,db - %,dB with %,d hashs}",
+                columnBloomFilter.getBitSize(), columnBloomFilter.getByteSize(), columnBloomFilter.getHashes()) : ""));
       }
       encodings.clear();
       pageCount = 0;
@@ -209,6 +217,11 @@ class ColumnChunkPageWriteStore implements PageWriteStore {
       int uncompressedSize = (int)dictionaryBytes.size();
       BytesInput compressedBytes = compressor.compress(dictionaryBytes);
       this.dictionaryPage = new DictionaryPage(BytesInput.copy(compressedBytes), uncompressedSize, dictionaryPage.getDictionarySize(), dictionaryPage.getEncoding());
+    }
+
+    @Override
+    public void writeBloomFilter(BloomFilter bloomFilter) {
+      columnBloomFilter = bloomFilter;
     }
 
     @Override

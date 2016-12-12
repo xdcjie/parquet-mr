@@ -44,6 +44,7 @@ import org.apache.parquet.bytes.BytesInput;
 import org.apache.parquet.bytes.BytesUtils;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.Encoding;
+import org.apache.parquet.column.bloomfilter.BloomFilter;
 import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.statistics.Statistics;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
@@ -416,6 +417,23 @@ public class ParquetFileWriter {
     bytes.writeAllTo(out);
     currentEncodings.addAll(encodings);
     currentStatistics = totalStats;
+  }
+
+  public void writeBloomFilter(BloomFilter bloomFilter) throws IOException {
+    state = state.write();
+    if (DEBUG) LOG.debug(out.getPos() + ": write bloom filter");
+    long beforeBloomFilter = out.getPos();
+    BytesInput.from(bloomFilter.getBytes()).writeAllTo(out);
+    long bloomFilterSize = out.getPos() - beforeBloomFilter;
+    if (bloomFilterSize != bloomFilter.getByteSize()) {
+      throw new IOException(String.format(
+              "write bloom filter error : bitset size [%,d] is not equal to write byte size [%,d].",
+              bloomFilterSize, bloomFilter.getByteSize()));
+    }
+    bloomFilter.setByteLength(bloomFilterSize);
+    bloomFilter.setFileOffset(beforeBloomFilter);
+    bloomFilter.clear();
+    currentStatistics.setBloomFilter(bloomFilter);
   }
 
   /**

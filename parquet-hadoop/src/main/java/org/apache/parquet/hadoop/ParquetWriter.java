@@ -26,9 +26,12 @@ import org.apache.hadoop.fs.Path;
 
 import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.column.ParquetProperties.WriterVersion;
+import org.apache.parquet.column.bloomfilter.BloomFilterProperties;
 import org.apache.parquet.hadoop.api.WriteSupport;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.schema.MessageType;
+
+import static org.apache.parquet.hadoop.ParquetOutputFormat.*;
 
 /**
  * Write records to a Parquet file.
@@ -43,6 +46,10 @@ public class ParquetWriter<T> implements Closeable {
   public static final boolean DEFAULT_IS_VALIDATING_ENABLED = false;
   public static final WriterVersion DEFAULT_WRITER_VERSION =
       WriterVersion.PARQUET_1_0;
+  public static final boolean DEFAULT_IS_BF_ENABLED = false;
+  public static final float DEFAULT_BF_FALSE_POSITIVE = 0.01F;
+  public static final int DEFAULT_VALUE_COUNT_THRESHOLD = 1000;
+  public static final float DEFAULT_UNIQUE_RATIO_THRESHOLD = 0.4F;
 
   // max size (bytes) to write as padding and the min size of a row group
   public static final int MAX_PADDING_SIZE_DEFAULT = 0;
@@ -266,21 +273,44 @@ public class ParquetWriter<T> implements Closeable {
     ParquetFileWriter fileWriter = new ParquetFileWriter(
         conf, schema, file, mode, blockSize, maxPaddingSize);
     fileWriter.start();
+    BloomFilterProperties bloomFilterProperties = null;
+    if (conf.getBoolean(ENABLE_BLOOM_FILTER, DEFAULT_IS_BF_ENABLED) == true) {
+      bloomFilterProperties = new BloomFilterProperties(
+          conf.getFloat(BLOOM_UNIQUE_RATIO_THRESHOLD, DEFAULT_UNIQUE_RATIO_THRESHOLD),
+          conf.getInt(BLOOM_VALUE_COUNT_THRESHOLD, DEFAULT_VALUE_COUNT_THRESHOLD),
+          conf.getFloat(BLOOM_FILTER_FALSE_POSITIVE, DEFAULT_BF_FALSE_POSITIVE));
+    }
 
     CodecFactory codecFactory = new CodecFactory(conf);
     CodecFactory.BytesCompressor compressor =	codecFactory.getCompressor(compressionCodecName, 0);
-    this.writer = new InternalParquetRecordWriter<T>(
-        fileWriter,
-        writeSupport,
-        schema,
-        writeContext.getExtraMetaData(),
-        blockSize,
-        pageSize,
-        compressor,
-        dictionaryPageSize,
-        enableDictionary,
-        validating,
-        writerVersion);
+    if (bloomFilterProperties == null) {
+      this.writer = new InternalParquetRecordWriter<T>(
+          fileWriter,
+          writeSupport,
+          schema,
+          writeContext.getExtraMetaData(),
+          blockSize,
+          pageSize,
+          compressor,
+          dictionaryPageSize,
+          enableDictionary,
+          validating,
+          writerVersion);
+    } else {
+      this.writer = new InternalParquetRecordWriter<T>(
+          fileWriter,
+          writeSupport,
+          schema,
+          writeContext.getExtraMetaData(),
+          blockSize,
+          pageSize,
+          compressor,
+          dictionaryPageSize,
+          enableDictionary,
+          validating,
+          writerVersion,
+          bloomFilterProperties);
+    }
   }
 
   public void write(T object) throws IOException {

@@ -28,6 +28,8 @@ import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.ColumnWriter;
 import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.column.ParquetProperties.WriterVersion;
+import org.apache.parquet.column.bloomfilter.BloomFilterProperties;
+import org.apache.parquet.column.bloomfilter.UniqueBinaryContainer;
 import org.apache.parquet.column.page.DictionaryPage;
 import org.apache.parquet.column.page.PageWriter;
 import org.apache.parquet.column.statistics.Statistics;
@@ -60,6 +62,8 @@ final class ColumnWriterV1 implements ColumnWriter {
 
   private Statistics statistics;
 
+  private UniqueBinaryContainer columnUniqueBinaryContainer = null;
+
   public ColumnWriterV1(
       ColumnDescriptor path,
       PageWriter pageWriter,
@@ -83,6 +87,32 @@ final class ColumnWriterV1 implements ColumnWriter {
     this.dataColumn = parquetProps.getValuesWriter(path, initialSlabSize, pageSizeThreshold);
   }
 
+  public ColumnWriterV1(
+          ColumnDescriptor path,
+          PageWriter pageWriter,
+          int pageSizeThreshold,
+          int dictionaryPageSizeThreshold,
+          boolean enableDictionary,
+          WriterVersion writerVersion,
+          BloomFilterProperties bloomFilterProperties) {
+    this.path = path;
+    this.pageWriter = pageWriter;
+    this.pageSizeThreshold = pageSizeThreshold;
+    // initial check of memory usage. So that we have enough data to make an initial prediction
+    this.valueCountForNextSizeCheck = INITIAL_COUNT_FOR_SIZE_CHECK;
+    resetStatistics();
+
+    ParquetProperties parquetProps = new ParquetProperties(dictionaryPageSizeThreshold, writerVersion, enableDictionary);
+
+    this.repetitionLevelColumn = ParquetProperties.getColumnDescriptorValuesWriter(path.getMaxRepetitionLevel(), MIN_SLAB_SIZE, pageSizeThreshold);
+    this.definitionLevelColumn = ParquetProperties.getColumnDescriptorValuesWriter(path.getMaxDefinitionLevel(), MIN_SLAB_SIZE, pageSizeThreshold);
+
+    int initialSlabSize = CapacityByteArrayOutputStream.initialSlabSizeHeuristic(MIN_SLAB_SIZE, pageSizeThreshold, 10);
+    this.dataColumn = parquetProps.getValuesWriter(path, initialSlabSize, pageSizeThreshold);
+
+    resetCanBloomFilter(bloomFilterProperties);
+  }
+
   private void log(Object value, int r, int d) {
     LOG.debug(path + " " + value + " r:" + r + " d:" + d);
   }
@@ -91,6 +121,10 @@ final class ColumnWriterV1 implements ColumnWriter {
     this.statistics = Statistics.getStatsBasedOnType(this.path.getType());
   }
 
+  private void resetCanBloomFilter(BloomFilterProperties bloomFilterProperties) {
+    this.columnUniqueBinaryContainer = UniqueBinaryContainer.getContainerBasedOnType(this.path.getType());
+    this.columnUniqueBinaryContainer.setProperties(bloomFilterProperties);
+  }
   /**
    * Counts how many values have been written and checks the memory usage to flush the page when we reach the page threshold.
    *
@@ -124,22 +158,27 @@ final class ColumnWriterV1 implements ColumnWriter {
 
   private void updateStatistics(int value) {
     statistics.updateStats(value);
+    columnUniqueBinaryContainer.add(new Integer(value));
   }
 
   private void updateStatistics(long value) {
     statistics.updateStats(value);
+    columnUniqueBinaryContainer.add(new Long(value));
   }
 
   private void updateStatistics(float value) {
     statistics.updateStats(value);
+    columnUniqueBinaryContainer.add(new Float(value));
   }
 
   private void updateStatistics(double value) {
-   statistics.updateStats(value);
+    statistics.updateStats(value);
+    columnUniqueBinaryContainer.add(new Double(value));
   }
 
   private void updateStatistics(Binary value) {
-   statistics.updateStats(value);
+    statistics.updateStats(value);
+    columnUniqueBinaryContainer.add(value);
   }
 
   private void updateStatistics(boolean value) {
@@ -164,6 +203,11 @@ final class ColumnWriterV1 implements ColumnWriter {
     dataColumn.reset();
     valueCount = 0;
     resetStatistics();
+  }
+
+  private void writeBloomFilter() {
+    if (DEBUG) LOG.debug(("write bloom filter"));
+    pageWriter.writeBloomFilter(columnUniqueBinaryContainer.getBloomFilter());
   }
 
   @Override
@@ -238,6 +282,9 @@ final class ColumnWriterV1 implements ColumnWriter {
   public void flush() {
     if (valueCount > 0) {
       writePage();
+    }
+    if (columnUniqueBinaryContainer != null) {
+      writeBloomFilter();
     }
     final DictionaryPage dictionaryPage = dataColumn.createDictionaryPage();
     if (dictionaryPage != null) {

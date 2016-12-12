@@ -19,6 +19,7 @@
 package org.apache.parquet.column.statistics;
 
 import org.apache.parquet.column.UnknownColumnTypeException;
+import org.apache.parquet.column.bloomfilter.BloomFilter;
 import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
 import java.util.Arrays;
@@ -33,6 +34,7 @@ public abstract class Statistics<T extends Comparable<T>> {
 
   private boolean hasNonNullValue;
   private long num_nulls;
+  private BloomFilter<T> bloomFilter;
 
   public Statistics() {
     hasNonNullValue = false;
@@ -225,6 +227,29 @@ public abstract class Statistics<T extends Comparable<T>> {
    */
   public void setNumNulls(long nulls) {
     num_nulls = nulls;
+  }
+
+  /**
+   * Returns the bloom filter
+   * @return bloom filter
+   */
+  public BloomFilter<T> getBloomFilter() {
+    return bloomFilter;
+  }
+
+  /**
+   * Sets the bloom filter of column to the parameter value
+   * @param bf bloom filter reference to set bloomFilter to
+   */
+  public void setBloomFilter(BloomFilter<T> bf) {
+    bloomFilter = bf;
+  }
+
+  /**
+   * Returns whether there have been bloom filter added to this statistics
+   */
+  public boolean hasBloomFilter() {
+    return bloomFilter != null;
   }
 
   /**

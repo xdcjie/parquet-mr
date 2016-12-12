@@ -32,6 +32,7 @@ import org.apache.parquet.Log;
 import org.apache.parquet.column.ColumnWriteStore;
 import org.apache.parquet.column.ParquetProperties;
 import org.apache.parquet.column.ParquetProperties.WriterVersion;
+import org.apache.parquet.column.bloomfilter.BloomFilterProperties;
 import org.apache.parquet.hadoop.CodecFactory.BytesCompressor;
 import org.apache.parquet.hadoop.api.WriteSupport;
 import org.apache.parquet.hadoop.api.WriteSupport.FinalizedWriteContext;
@@ -96,6 +97,41 @@ class InternalParquetRecordWriter<T> {
     this.compressor = compressor;
     this.validating = validating;
     this.parquetProperties = new ParquetProperties(dictionaryPageSize, writerVersion, enableDictionary);
+    initStore();
+  }
+
+  /**
+   * @param parquetFileWriter the file to write to
+   * @param writeSupport the class to convert incoming records
+   * @param schema the schema of the records
+   * @param extraMetaData extra meta data to write in the footer of the file
+   * @param rowGroupSize the size of a block in the file (this will be approximate)
+   * @param compressor the codec used to compress
+   */
+  public InternalParquetRecordWriter(
+          ParquetFileWriter parquetFileWriter,
+          WriteSupport<T> writeSupport,
+          MessageType schema,
+          Map<String, String> extraMetaData,
+          long rowGroupSize,
+          int pageSize,
+          BytesCompressor compressor,
+          int dictionaryPageSize,
+          boolean enableDictionary,
+          boolean validating,
+          WriterVersion writerVersion,
+          BloomFilterProperties bloomFilterProperties) {
+    this.parquetFileWriter = parquetFileWriter;
+    this.writeSupport = checkNotNull(writeSupport, "writeSupport");
+    this.schema = schema;
+    this.extraMetaData = extraMetaData;
+    this.rowGroupSize = rowGroupSize;
+    this.rowGroupSizeThreshold = rowGroupSize;
+    this.nextRowGroupSize = rowGroupSizeThreshold;
+    this.pageSize = pageSize;
+    this.compressor = compressor;
+    this.validating = validating;
+    this.parquetProperties = new ParquetProperties(dictionaryPageSize, writerVersion, enableDictionary, bloomFilterProperties);
     initStore();
   }
 

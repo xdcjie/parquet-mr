@@ -41,6 +41,7 @@ import org.apache.parquet.column.values.plain.BooleanPlainValuesWriter;
 import org.apache.parquet.column.values.plain.FixedLenByteArrayPlainValuesWriter;
 import org.apache.parquet.column.values.plain.PlainValuesWriter;
 import org.apache.parquet.column.values.rle.RunLengthBitPackingHybridValuesWriter;
+import org.apache.parquet.column.bloomfilter.BloomFilterProperties;
 import org.apache.parquet.schema.MessageType;
 
 /**
@@ -74,11 +75,19 @@ public class ParquetProperties {
   private final int dictionaryPageSizeThreshold;
   private final WriterVersion writerVersion;
   private final boolean enableDictionary;
+  private BloomFilterProperties bloomFilterProperties = null;
 
   public ParquetProperties(int dictPageSize, WriterVersion writerVersion, boolean enableDict) {
     this.dictionaryPageSizeThreshold = dictPageSize;
     this.writerVersion = writerVersion;
     this.enableDictionary = enableDict;
+  }
+
+  public ParquetProperties(int dictPageSize, WriterVersion writerVersion, boolean enableDict, BloomFilterProperties bloomFilterProperties) {
+    this.dictionaryPageSizeThreshold = dictPageSize;
+    this.writerVersion = writerVersion;
+    this.enableDictionary = enableDict;
+    this.bloomFilterProperties = bloomFilterProperties;
   }
 
   public static ValuesWriter getColumnDescriptorValuesWriter(int maxLevel, int initialSizePerCol, int pageSize) {
@@ -224,11 +233,19 @@ public class ParquetProperties {
       int pageSize) {
     switch (writerVersion) {
     case PARQUET_1_0:
-      return new ColumnWriteStoreV1(
-          pageStore,
-          pageSize,
-          dictionaryPageSizeThreshold,
-          enableDictionary, writerVersion);
+      if (bloomFilterProperties == null) {
+        return new ColumnWriteStoreV1(
+            pageStore,
+            pageSize,
+            dictionaryPageSizeThreshold,
+            enableDictionary, writerVersion);
+      } else {
+        return new ColumnWriteStoreV1(
+            pageStore,
+            pageSize,
+            dictionaryPageSizeThreshold,
+            enableDictionary, writerVersion, bloomFilterProperties);
+      }
     case PARQUET_2_0:
       return new ColumnWriteStoreV2(
           schema,

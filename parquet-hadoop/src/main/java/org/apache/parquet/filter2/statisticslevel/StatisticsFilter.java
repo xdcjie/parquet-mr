@@ -120,6 +120,12 @@ public class StatisticsFilter implements FilterPredicate.Visitor<Boolean> {
       return true;
     }
 
+    if (stats.hasBloomFilter() && stats.getBloomFilter().getByteSize() > 0) {
+      // we are looking for records where bloomfilter contain v 
+      // and this column is not contain (value), so drop it.
+      return stats.getBloomFilter().contains(value) == false;
+    }
+
     // drop if value < min || value > max
     return value.compareTo(stats.genericGetMin()) < 0 || value.compareTo(stats.genericGetMax()) > 0;
   }
